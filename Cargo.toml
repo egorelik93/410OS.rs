@@ -1,0 +1,23 @@
+[package]
+name = "kern"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "partial_kernel_rs"
+path = "./kernel.rs"
+test = false
+bench = false
+crate-type = [ "staticlib" ]
+
+
+[dependencies]
+_410kern = { path = "../410kern" }
+num-traits = { version = "*", default-features = false }
+elain = "*"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

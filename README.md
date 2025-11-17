@@ -11,6 +11,9 @@ development.
 
 Out of respect for the course, the supplied course code and ports thereof are not part of this repo. That does mean that the repo will not build on its own.
 
+An earlier version of this project, never published, was started in 2017, but stalled due to predating
+custom allocator APIs.
+
 
 
 

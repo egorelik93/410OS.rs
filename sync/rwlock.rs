@@ -6,6 +6,7 @@
 //! This code primarily just implements the mode switching.
 
 use core::cell::UnsafeCell;
+use core::mem::ManuallyDrop;
 use core::ops::{Deref, DerefMut};
 
 use super::cond::Cond;
@@ -54,7 +55,7 @@ impl<T> RWLock<T> {
             }),
             canWrite: Cond::new(),
             canRead: Cond::new(),
-            data: Unsafe::new(data)
+            data: UnsafeCell::new(data)
         }
     }
 }
@@ -93,7 +94,7 @@ impl<T> RWLock<T> {
         status.readerCount += 1;
         status.mode = RWLockMode::Read;
 
-        ReadGuard(self, unsafe { &*self.data.get() })
+        ReadGuard(self, self.data.get())
     }
 
     /// Wait for write access to the rwlock.
@@ -116,22 +117,22 @@ impl<T> RWLock<T> {
         status.writerWaitlistSize -= 1;
         status.mode = RWLockMode::Write;
 
-        WriteGuard(self, unsafe { &mut *self.data.get() })
+        WriteGuard(self, self.data.get())
     }
 }
 
 #[derive(Debug)]
-pub struct ReadGuard<'a, T>(&'a RWLock<T>, &'a T);
+pub struct ReadGuard<'a, T>(&'a RWLock<T>, *const T);
 
 #[derive(Debug)]
-pub struct WriteGuard<'a, T>(&'a RWLock<T>, &'a mut T);
+pub struct WriteGuard<'a, T>(&'a RWLock<T>, *mut T);
 
 
 impl<T> Deref for ReadGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.1
+        unsafe { &*self.1 }
     }
 }
 
@@ -139,13 +140,13 @@ impl<T> Deref for WriteGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.1
+        unsafe { &*self.1 }
     }
 }
 
 impl<T> DerefMut for WriteGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.1
+        unsafe { &mut *self.1 }
     }
 }
 
@@ -184,17 +185,17 @@ impl<T> Drop for WriteGuard<'_, T> {
     }
 }
 
-impl<'a, T> WriteGuard<'a, T> {
+impl<'a, T> WriteGuard<'a, T> where T: 'a {
     /// Downgrades access to read from write.
     ///
     /// This simply switches the state between modes
     /// without releasing the lock.
     pub fn downgradeRWLock(self) -> ReadGuard<'a, T> {
-        let mut status = self.0.status.lock();
+        let mut status = &mut *self.0.status.lock();
 
         status.readerCount += 1;
         status.mode = RWLockMode::Read;
 
-        ReadGuard(self.0, &self.1)
+        ReadGuard(self.0, self.1)
     }
 }

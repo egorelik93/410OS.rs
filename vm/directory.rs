@@ -8,7 +8,7 @@ use _410kern::page::PAGE_SIZE;
 use alloc::alloc::alloc;
 use alloc::boxed::Box;
 
-use crate::virtual_memory::{Page, PageDirectory, assume_direct_mapping, from_direct_mapping, kernelDirectory};
+use crate::virtual_memory::{Page, PageDirectory, assume_direct_mapping, from_direct_mapping, inKernelDirectory, kernelDirectory};
 use super::vm_internal::PageTable;
 
 impl PageDirectory {
@@ -34,8 +34,7 @@ impl Drop for PageDirectory {
     /// This function is safe as long as we are in the kernelDirectory
     /// and not trying to drop it.
     fn drop(&mut self) {
-        assert!(unsafe { get_cr3() == from_direct_mapping(kernelDirectory()) }
-            && self as *const _ != kernelDirectory());
+        assert!(inKernelDirectory() && self as *const _ != kernelDirectory());
 
         for tableEntry in self.0 {
             if tableEntry.page_is_present() {

@@ -26,13 +26,13 @@ pub const TABLE_SIZE: usize = NUM_PAGE_ENTRIES * PAGE_SIZE;
 
 /// Round down an address to a page boundary.
 #[inline(always)]
-pub const fn PAGE_ALIGN(address: usize) -> usize {
+pub fn PAGE_ALIGN(address: usize) -> usize {
     FILTER_BIT_RANGE(address, 12, 32)
 }
 
 /// Round down an address to a table boundary.
 #[inline(always)]
-pub const fn TABLE_ALIGN(address: usize) -> usize {
+pub fn TABLE_ALIGN(address: usize) -> usize {
     FILTER_BIT_RANGE(address, 22, 32)
 }
 
@@ -49,12 +49,12 @@ pub const fn ERROR_AT(address: usize) -> usize {
 }
 
 
-pub const PAGE_PRESENT_BIT: u8 = 0;
-pub const PAGE_WRITABLE_BIT: u8 = 0;
-pub const PAGE_USER_ACCESS_BIT: u8 = 0;
-pub const PAGE_GLOBAL_BIT: u8 = 8;
-pub const PAGE_COPY_ON_WRITE_BIT: u8 = 9;
-pub const PAGE_FREE_BIT: u8 = 10;
+pub const PAGE_PRESENT_BIT: usize = 0;
+pub const PAGE_WRITABLE_BIT: usize = 0;
+pub const PAGE_USER_ACCESS_BIT: usize = 0;
+pub const PAGE_GLOBAL_BIT: usize = 8;
+pub const PAGE_COPY_ON_WRITE_BIT: usize = 9;
+pub const PAGE_FREE_BIT: usize = 10;
 
 pub const PAGE_PRESENT: u32 = 1 << PAGE_PRESENT_BIT;
 pub const PAGE_WRITABLE: u32 = 1 << PAGE_WRITABLE_BIT;
@@ -68,7 +68,7 @@ impl LogicalAddress {
     /// Construct a logical address.
     pub fn new(tableIndex: u16, pageIndex: u16, offset: u16) -> Self {
         LogicalAddress(
-            (tableIndex << 22) as u32 | (pageIndex << 12) as u32 | offset as u32)
+            (tableIndex as usize) << 22 | (pageIndex as usize) << 12 | offset as usize)
     }
 
     /// Takes the offset LogicalAddress
@@ -83,7 +83,7 @@ impl LogicalAddress {
 
 pub const PHYS_NULL: PhysicalAddress = 0;
 pub const LOGIC_NULL: LogicalAddress = LogicalAddress(0);
-pub const NOT_A_FRAME: PhysicalAddress = -1;
+pub const NOT_A_FRAME: PhysicalAddress = usize::MAX;
 pub const NOT_A_PAGE: *mut Page = NOT_A_FRAME as *mut Page;
 
 
@@ -98,7 +98,7 @@ impl Iterator for PageIter {
     type Item = LogicalAddress;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.start <= self.next && self.current < self.next {
+        if self.start <= self.next && self.next < self.end {
             let current = LogicalAddress(self.next);
             self.next += PAGE_SIZE;
             Some(current)
@@ -111,11 +111,11 @@ impl Iterator for PageIter {
 /// This serves as the head of a loop
 /// that iterates over all page-aligned addresses
 /// whose pages contain addresses in the range.
-pub fn foreach_page_in(start: usize, end: usize) -> impl Iterator<Item = LogicalAddress> {
-    let start = PAGE_ALIGN(start);
+pub fn foreach_page_in(start: LogicalAddress, end: LogicalAddress) -> impl Iterator<Item = LogicalAddress> {
+    let start = PAGE_ALIGN(start.0);
     PageIter {
         start: start,
-        end: if end == 0 { usize::MAX } else { end },
+        end: if end.0 == 0 { usize::MAX } else { end.0 },
         next: start
     }
 }
@@ -131,7 +131,7 @@ impl Iterator for TableIter {
     type Item = LogicalAddress;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.start <= self.next && self.current < self.next {
+        if self.start <= self.next && self.next < self.end {
             let current = LogicalAddress(self.next);
             self.next += TABLE_SIZE;
             Some(current)
@@ -144,31 +144,28 @@ impl Iterator for TableIter {
 /// This serves as the head of a loop
 /// that iterates over all table-aligned addresses
 /// whose pages contain addresses in the range.
-pub fn foreach_table_in(start: usize, end: usize) -> impl Iterator<Item = LogicalAddress> {
-    let start = TABLE_ALIGN(start);
+pub fn foreach_table_in(start: LogicalAddress, end: LogicalAddress) -> impl Iterator<Item = LogicalAddress> {
+    let start = TABLE_ALIGN(start.0);
     TableIter {
         start: start,
-        end: if end == 0 { usize::MAX } else { end },
+        end: if end.0 == 0 { usize::MAX } else { end.0 },
         next: start
     }
 }
 
 #[derive(Debug)]
-struct EntryIter<'a> {
-    dir: &'a mut PageDirectory,
+pub struct EntryIter {
     next: usize,
     start: usize,
     end: usize
 }
 
-impl<'a> Iterator for EntryIter<'a> {
-    type Item = (&'a mut PageDirectory, LogicalAddress);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.start <= self.next && self.current < self.next {
+impl EntryIter {
+    fn next(&mut self, dir: &PageDirectory) -> Option<LogicalAddress> {
+        if self.start <= self.next && self.next < self.end {
             let current = LogicalAddress(self.next);
-            self.next += nextAddress(self.dir, current);
-            Some((self.dir, current))
+            self.next = nextAddress(dir, current).0;
+            Some(current)
         } else { None }
     }
 }
@@ -184,15 +181,15 @@ impl<'a> Iterator for EntryIter<'a> {
 /// it skips over tables that do not have
 /// entries in the directory.
 ///
-/// The original did not also return PageDirectory, but with
-/// our callers and Rust's borrowing rules, it will not work without it.
-pub fn foreach_entry_in(dir: &mut PageDirectory, start: usize, end: usize)
--> impl Iterator<Item = (&mut PageDirectory, LogicalAddress)> {
-    let start = PAGE_ALIGN(start);
+/// Unfortunately, due to borrowing, we cannot pass in PageDirectory
+/// here as in the original.
+/// Instead, we need to pass in the PageDirectory on each call to next;
+/// this prevents us from implementing the Rust Iterator trait.
+pub fn foreach_entry_in(start: LogicalAddress, end: LogicalAddress) -> EntryIter {
+    let start = PAGE_ALIGN(start.0);
     EntryIter {
-        dir,
         start: start,
-        end: if end == 0 { usize::MAX } else { end },
+        end: if end.0 == 0 { usize::MAX } else { end.0 },
         next: start
     }
 }
@@ -244,7 +241,10 @@ pub use direct_mapping::DirectMapping;
 
 
 /* Page Directories */
-pub use manager::kernelDirectory;
+pub use manager::{
+    kernelDirectory,
+    inKernelDirectory
+};
 
 
 /* Memory Allocation and Freeing */

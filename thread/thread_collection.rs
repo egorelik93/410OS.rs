@@ -27,7 +27,8 @@ impl ThreadCollection {
 
     /// Remove a thread from a collection.
     pub fn removeThread<'a>(&self, thread: Pin<&mut ThreadBlock>) -> Pin<Thread> {
-        let mut guard = self.queue.lock();
+        let mut guard = self.queue.lockRead();
         remove!(&mut guard, thread.as_ref(), link);
+        todo!()
     }
 }

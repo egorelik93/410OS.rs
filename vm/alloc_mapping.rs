@@ -18,11 +18,11 @@ impl AddressMapping for AllocMapping {
     }
 
     /// Reserves space for an address mapping.
-    fn reserveAddressMapping(count: u32) -> Result<(), ()> {
+    fn reserveAddressMapping(count: usize) -> Result<(), ()> {
         reserveFrames(count)
     }
 
-    fn unreserveAddressMapping(count: u32) {
+    fn unreserveAddressMapping(count: usize) {
         unreserveFrames(count);
     }
 

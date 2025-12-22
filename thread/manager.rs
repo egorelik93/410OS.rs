@@ -35,5 +35,5 @@ pub fn getActiveThreadByTid(tid: i32) -> Option<ThreadHandle> {
 /// Sets the suspended user state pointer
 /// of the current thread.
 pub(super) fn setSuspendedState(state: *mut SuspendedState) {
-    getCurrentThread()?.suspendedUserState.set(state);
+    getCurrentThread().map(|t| t.suspendedUserState.set(state));
 }

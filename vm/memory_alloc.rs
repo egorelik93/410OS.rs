@@ -12,6 +12,14 @@ use super::address_mapping::AddressMapping;
 use super::vm_internal::invalidatePage;
 
 
+/// Check whether it is safe to follow and mutate within the page directory.
+///
+/// Not in the original implementation.
+fn isSafe(dir: &PageDirectory) -> bool {
+    (unsafe { (get_cr3() as usize) == from_direct_mapping(kernelDirectory().cast_mut()) })
+        && (ptr::from_ref(dir) != kernelDirectory())
+}
+
 /* Allocation */
 
 /// Allocates a page and maps it.
@@ -20,7 +28,7 @@ use super::vm_internal::invalidatePage;
 /// This did not exist in the original implementation.
 #[inline(always)]
 pub fn mapPageSafe<M: AddressMapping>(dir: &mut PageDirectory, addr: LogicalAddress, flags: u32) -> Option<*mut Page> {
-    assert!(unsafe { get_cr3() == from_direct_mapping(kernelDirectory()) } && dir != kernelDirectory());
+    assert!(isSafe(dir));
     unsafe {
         mapPage::<M>(dir, addr, flags)
     }
@@ -32,14 +40,14 @@ pub unsafe fn mapPage<M: AddressMapping>(dir: &mut PageDirectory, addr: LogicalA
     let pageAddr = LogicalAddress(PAGE_ALIGN(addr.0));
     let frame = M::allocAddressMapping(pageAddr)?;
 
-    if !isPageAligned(ptr::without_provenance(frame)) {
+    if !isPageAligned(ptr::without_provenance_mut::<u8>(frame)) {
         lprintf!("Can't map page.\n");
         return None;
     }
 
     unsafe {
         let page = unsafe { assume_direct_mapping(frame) };
-        dir.insertPage(page, addr, flags)?;
+        dir.insertPage(page, addr, flags).ok()?;
 
         Some(page)
     }
@@ -64,7 +72,7 @@ pub fn mapMemoryRangeSafe<M: AddressMapping>(
     end: LogicalAddress,
     flags: u32)
 -> Result<PhysicalAddress, PhysicalAddress> {
-    assert!(unsafe { get_cr3() == from_direct_mapping(kernelDirectory()) } && dir != kernelDirectory());
+    assert!(isSafe(dir));
     unsafe {
         mapMemoryRange::<M>(dir, start, end, flags)
     }
@@ -78,7 +86,7 @@ pub fn mapMemoryRangeSafe<M: AddressMapping>(
 /// if something failed, which must not
 /// be page aligned.
 /// Note that a return corresponding to
-/// -1 indicates no allocations succeeded.
+/// usize::MAX indicates no allocations succeeded.
 pub unsafe fn mapMemoryRange<M: AddressMapping>(
     dir: &mut PageDirectory,
     start: LogicalAddress,
@@ -87,17 +95,17 @@ pub unsafe fn mapMemoryRange<M: AddressMapping>(
 -> Result<PhysicalAddress, PhysicalAddress> {
     for addr in foreach_page_in(start, end) {
         match unsafe { mapPage::<M>(dir, addr, flags) } {
-            None => Err(addr - 1),
+            None => return Err(addr.0 - 1),
             Some(page) => if !isPageAligned(page) {
-                return Err(addr - 1);
+                return Err(addr.0 - 1);
             }
         }
     }
 
     match unsafe { dir.tryGetPage(start) } {
-        None => Err(-1),
+        None => Err(usize::MAX),
         Some(startPage) => unsafe {
-            Ok(from_direct_mapping(startPage) + start.get_page_offset())
+            Ok(from_direct_mapping(core::ptr::from_ref(startPage).cast_mut()) + start.get_page_offset() as usize)
         }
     }
 }
@@ -111,7 +119,7 @@ pub unsafe fn mapMemoryRange<M: AddressMapping>(
 /// This did not exist in the original implementation.
 #[inline(always)]
 pub fn freeMappedPageSafe<M: AddressMapping>(dir: &mut PageDirectory, addr: LogicalAddress) {
-    assert!(unsafe { get_cr3() == from_direct_mapping(kernelDirectory()) } && dir != kernelDirectory());
+    assert!(isSafe(dir));
     unsafe {
         freeMappedPage::<M>(dir, addr);
     }
@@ -119,7 +127,10 @@ pub fn freeMappedPageSafe<M: AddressMapping>(dir: &mut PageDirectory, addr: Logi
 
 /// Free the page corresponding to an address.
 pub unsafe fn freeMappedPage<M: AddressMapping>(dir: &mut PageDirectory, addr: LogicalAddress) {
-    let entry = unsafe { dir.tryGetPageEntryMut(addr)? };
+    let dir_ptr = ptr::from_mut(dir);
+
+    let Some(entry) = (unsafe { dir.tryGetPageEntryMut(addr) })
+        else { return };
 
     if entry.page_is_present() {
         if entry.page_is_copy_on_write() {
@@ -129,7 +140,7 @@ pub unsafe fn freeMappedPage<M: AddressMapping>(dir: &mut PageDirectory, addr: L
             M::freeAddressMapping(page);
         }
 
-        if unsafe { get_cr3() == from_direct_mapping(dir) } {
+        if unsafe { get_cr3() as usize == from_direct_mapping(dir_ptr) } {
             invalidatePage(addr);
         }
 
@@ -142,16 +153,17 @@ pub unsafe fn freeMappedPage<M: AddressMapping>(dir: &mut PageDirectory, addr: L
 /// This function is safe as long we are in the kernelDirectory and not trying to modify it.
 /// This did not exist in the original implementation.
 #[inline(always)]
-pub fn freeMemoryRangeSafe<M: AddressMapping>(dir: &PageDirectory, start: LogicalAddress, end: LogicalAddress) {
-    assert!(unsafe { get_cr3() == from_direct_mapping(kernelDirectory()) } && dir != kernelDirectory());
+pub fn freeMemoryRangeSafe<M: AddressMapping>(dir: &mut PageDirectory, start: LogicalAddress, end: LogicalAddress) {
+    assert!(isSafe(dir));
     unsafe {
         freeMemoryRange::<M>(dir, start, end);
     }
 }
 
 /// Free an entire range of pages.
-pub unsafe fn freeMemoryRange<M: AddressMapping>(dir: &PageDirectory, start: LogicalAddress, end: LogicalAddress) {
-    for (dir, addr) in foreach_entry_in(dir, start, end) {
+pub unsafe fn freeMemoryRange<M: AddressMapping>(dir: &mut PageDirectory, start: LogicalAddress, end: LogicalAddress) {
+    let mut iter = foreach_entry_in(start, end);
+    while let Some(addr) = iter.next(dir) {
         unsafe { freeMappedPage::<M>(dir, addr); }
     }
 }

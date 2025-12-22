@@ -1,6 +1,7 @@
 //! Checks whether a given address is valid.
 
 use core::ffi::CStr;
+use core::u8;
 
 use _410kern::cr::get_cr3;
 use _410kern::page::PAGE_SIZE;
@@ -18,8 +19,8 @@ pub fn isPageAligned<T>(addr: *mut T) -> bool {
 #[inline(always)]
 unsafe fn getPageFlags(addr: LogicalAddress) -> Option<PageEntry> {
     unsafe {
-        let dir: &PageDirectory = assume_direct_mapping(get_cr3()).as_ref()?;
-        Some(*dir.tryGetPageEntry(addr)?);
+        let dir = assume_direct_mapping::<PageDirectory>(get_cr3() as usize).as_ref()?;
+        Some(*dir.tryGetPageEntry(addr)?)
     }
 }
 
@@ -40,7 +41,7 @@ pub unsafe fn isUserReadableAddr(addr: LogicalAddress, len: usize) -> bool {
     foreach_page_in(addr, addr.offset(len)).all(|curr| {
         match unsafe { getPageFlags(curr) } {
             None => false,
-            Some(entry) => entry.page_is_present() && GET_BIT(entry, PAGE_USER_ACCESS_BIT)
+            Some(entry) => entry.page_is_present() && GET_BIT(entry.0, PAGE_USER_ACCESS_BIT)
         }
     })
 }
@@ -52,8 +53,8 @@ pub unsafe fn isUserWritableAddr(addr: LogicalAddress, len: usize) -> bool {
         match unsafe { getPageFlags(curr) } {
             None => false,
             Some(entry) => entry.page_is_present()
-                && GET_BIT(entry, PAGE_USER_ACCESS_BIT)
-                && GET_BIT(entry, PAGE_WRITABLE_BIT)
+                && GET_BIT(entry.0, PAGE_USER_ACCESS_BIT)
+                && GET_BIT(entry.0, PAGE_WRITABLE_BIT)
         }
     })
 }
@@ -61,11 +62,11 @@ pub unsafe fn isUserWritableAddr(addr: LogicalAddress, len: usize) -> bool {
 /// Return the readable length of a string.
 pub unsafe fn readableStringLen(str: *const CStr) -> Option<usize> {
     let mut len = 0;
-    let mut c = str.as_ptr();
+    let mut c = unsafe { str.as_ref()?.as_ptr() };
 
     unsafe {
         while isUserReadableAddr(LogicalAddress(c.expose_provenance()), 1) {
-            if *c == b"\0"[0] {
+            if *c == b'\0' as i8 {
                 return Some(len);
             }
 

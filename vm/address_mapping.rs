@@ -17,10 +17,10 @@ pub trait AddressMapping {
 
     /// Reserves space for a mapping without
     /// actually allocating.
-    fn reserveAddressMapping(count: u32) -> Result<(), ()>;
+    fn reserveAddressMapping(count: usize) -> Result<(), ()>;
 
     /// Frees a space reservation
-    fn unreserveAddressMapping(count: u32);
+    fn unreserveAddressMapping(count: usize);
 
     /// Allocate the space for a previously reserved mapping.
     fn fulfillAddressMapping(addr: LogicalAddress) -> Option<PhysicalAddress>;

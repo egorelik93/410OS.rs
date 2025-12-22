@@ -49,9 +49,6 @@ use crate::variable_queue::Head;
 
 /// An identifier for a thread.
 ///
-/// Can be used to access the corresponding thread block, but as this handle is not bound
-/// to a lifetime, unless it is the current thread, this is unsafe.
-///
 /// Not in the original C implementation, which directly used pointers to ThreadBlocks
 /// for this.
 #[derive(Debug, Eq, PartialEq)]
@@ -96,7 +93,7 @@ impl Clone for ThreadHandle {
 
 impl Drop for ThreadHandle {
     fn drop(&mut self) {
-        self.refCount.fetch_sub(1, Ordering::AcqRel)
+        self.refCount.fetch_sub(1, Ordering::AcqRel);
     }
 }
 

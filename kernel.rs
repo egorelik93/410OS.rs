@@ -3,12 +3,13 @@
 #![no_std]
 #![no_main]
 
+// #![feature(unsafe_pinned)]
+#![feature(allocator_api)]
+
 // Temporary while I fill in the pieces.
 #![allow(warnings)]
 
 extern crate alloc;
-
-// #![feature(unsafe_pinned)]
 
 #[macro_use]
 mod variable_queue;

@@ -1,10 +1,13 @@
 //! Functions for mapping virtual memory.
 
+use core::alloc::Layout;
 use core::cell::OnceCell;
 use core::mem::MaybeUninit;
 use core::ptr::null_mut;
 
+use _410kern::cr::get_cr3;
 use _410kern::page::PAGE_SIZE;
+use alloc::alloc::alloc;
 use alloc::boxed::Box;
 
 use crate::sync::mutex::Mutex;
@@ -23,6 +26,14 @@ pub fn kernelDirectory() -> *const PageDirectory {
     unsafe { _kernelDirectory }
 }
 
+/// Return whether we are currently in the kernel directory.
+///
+/// This was not a separate function in the original implementation,
+/// due to being more verbose in Rust.
+pub fn inKernelDirectory() -> bool {
+    unsafe { get_cr3() as usize == from_direct_mapping(kernelDirectory().cast_mut()) }
+}
+
 /// Return a zeroed page
 #[inline(always)]
 pub fn zeroedPage() -> &'static Page {
@@ -31,7 +42,7 @@ pub fn zeroedPage() -> &'static Page {
 
 /// Return address of start of the next page to the input address
 #[inline(always)]
-pub fn nextAddress(dir: &PageDirectory, curr: LogicalAddress) {
+pub fn nextAddress(dir: &PageDirectory, curr: LogicalAddress) -> LogicalAddress {
     if curr.0 == TABLE_ALIGN(curr.0) {
         let entry = dir.getPageTableEntry(curr);
         if !entry.page_is_present() {
@@ -45,20 +56,20 @@ pub fn nextAddress(dir: &PageDirectory, curr: LogicalAddress) {
 pub unsafe fn initVirtualMemory() {
     let mut kernelDirectory: Box<PageDirectory> = PageDirectory::new().unwrap();
 
-    let numFrames = machine_phys_frames() as u32;
+    let numFrames = machine_phys_frames() as usize;
     let numTables = numFrames / PAGE_SIZE;
     let memSize = numFrames * PAGE_SIZE;
 
     for i in 0..numTables {
-        let mut table = Box::try_new(PageTable::default()).unwrap();
+        let mut table = unsafe { alloc(Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE)).cast::<PageTable>() };
 
         unsafe {
             kernelDirectory.insertPageTable(table, i, PAGE_WRITABLE);
         }
 
         for j in 0..NUM_PAGE_ENTRIES {
-            let addr = LogicalAddress::new(i, j, 0);
-            let isGlobal = if addr < super::common_kern::USER_MEM_START { PAGE_GLOBAL } else { 0 };
+            let addr = LogicalAddress::new(i as u16, j as u16, 0);
+            let isGlobal = if addr.0 < super::common_kern::USER_MEM_START { PAGE_GLOBAL } else { 0 };
 
             if addr.0 < memSize {
                 unsafe {
@@ -69,10 +80,8 @@ pub unsafe fn initVirtualMemory() {
     }
 
     unsafe {
-        *_kernelDirectory = MaybeUninit::new(Mutex::new(kernelDirectory));
+        *(&mut *_kernelDirectory) = kernelDirectory;
     }
-
-    _kernelDirectory.set(kernelDirectory).unwrap();
 
     todo!();
 

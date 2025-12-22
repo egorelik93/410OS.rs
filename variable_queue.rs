@@ -16,9 +16,9 @@ unsafe impl<Elem: Send> Send for Head<Elem> {}
 ///  collected into a queue owned by Head<Elem>
 #[derive(Debug)]
 pub struct Link<Elem> {
-    next: *const Elem,
-    prev: *const Elem,
-    inQueue: bool,
+    next: Cell<*const Elem>,
+    prev: Cell<*const Elem>,
+    inQueue: Cell<bool>,
     phantomPinned: PhantomPinned
 }
 
@@ -27,8 +27,8 @@ impl<Elem> Head<Elem> {
     /// Creates the head of a queue
     pub const fn new() -> Self {
         Head {
-            queueFront: null_mut(),
-            queueBack: null_mut()
+            queueFront: null(),
+            queueBack: null()
         }
     }
 }
@@ -37,8 +37,8 @@ impl<Elem> Link<Elem> {
     /// Creates a link
     pub const fn new() -> Self {
         Link {
-            next: Cell::new(null_mut()),
-            prev: Cell::new(null_mut()),
+            next: Cell::new(null()),
+            prev: Cell::new(null()),
             inQueue: Cell::new(false),
             phantomPinned: PhantomPinned
         }

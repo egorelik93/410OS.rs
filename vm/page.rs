@@ -22,9 +22,9 @@ impl Page {
     /// Should only be run while in the kernel directory.
     #[inline(always)]
     pub fn new() -> Option<NonNull<Page>> {
-        assert!(unsafe { get_cr3() == from_direct_mapping(kernelDirectory) });
+        assert!(inKernelDirectory());
 
-        let page = NonNull::new(unsafe { assume_direct_mapping::<Page>(allocFrame()?) })?;
+        let mut page = NonNull::new(unsafe { assume_direct_mapping::<Page>(allocFrame()?) })?;
         unsafe { page.as_mut().zero() };
         Some(page)
     }
@@ -33,10 +33,10 @@ impl Page {
     ///
     /// Should only be run while in the kernel directory.
     #[inline(always)]
-    pub fn freePage(self: NonNull<Page>) {
-        assert!(unsafe { get_cr3() == from_direct_mapping(kernelDirectory()) });
+    pub fn freePage(page: NonNull<Page>) {
+        assert!(inKernelDirectory());
 
-        freeFrame(unsafe { from_direct_mapping(self.as_ptr()) });
+        freeFrame(unsafe { from_direct_mapping(page.as_ptr()) });
     }
 
     /// Copies all contents of one page to another.

@@ -121,12 +121,12 @@ impl Cond {
     /// not deschedule itself or stop descheduling itself,
     /// depending on when the signal was sent compared
     /// to when the queue was unlocked.
-    pub fn waitForCond<T>(&self, guard: MutexGuard<T>) -> MutexGuard<T> {
+    pub fn waitForCond<'a, T>(&self, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T> {
         // Initialize the Queue information
         let thisThreadWaitInfo = QueueNode {
             doNotDeschedule: AtomicBool::new(TRY_TO_DESCHEDULE),
             link: Link::new(),
-            thread: getCurrentThread()
+            thread: getCurrentThread().map(|t| t.handle())
         };
 
         let thisThreadWaitInfo = pin!(thisThreadWaitInfo);
@@ -137,7 +137,7 @@ impl Cond {
         let mut queue = self.queue.lock();
 
         // Register yourself on the queue.
-        let thisThreadWaitInfo = unsafe { insert_tail!(&mut queue, thisThreadWaitInfo.as_ref(), link) };
+        let thisThreadWaitInfo = unsafe { insert_tail!(&mut queue, &*thisThreadWaitInfo, link) };
 
         // Unlock the user mutex.
         let mutex = guard.mutex();
@@ -205,8 +205,8 @@ impl Cond {
         /// Our call to make_runnable will simply do nothing.
         send_signal(&node.doNotDeschedule);
 
-        let thread = node.thread?;
-        scheduleThread(disableInterrupts(), thread);
+        let Some(thread) = &node.thread else { return };
+        scheduleThread(&disableInterrupts(), thread);
     }
 
     /// Allow some thread on the queue to run.
@@ -218,10 +218,10 @@ impl Cond {
     /// Wraps the critical section of signalAndRemoveQueueNode
     /// with locks.
     pub fn signalCond(&self) {
-        let queue = self.queue.lock();
+        let mut queue = self.queue.lock();
 
-        if let Some(front) = queue.front() {
-            Cond::signalAndRemoveQueueNode(queue, front);
+        if let Some(front) = unsafe { queue.front_unchecked() } {
+            Cond::signalAndRemoveQueueNode(&mut queue, front);
         }
     }
 
@@ -229,10 +229,10 @@ impl Cond {
     ///
     /// Locks the queue and sends everyone a signal.
     pub fn broadcastCond(&self) {
-        let queue = self.queue.lock();
+        let mut queue = self.queue.lock();
 
-        for curr in queue.iter(|n| n.link) {
-            Cond::signalAndRemoveQueueNode(queue, curr);
+        for curr in unsafe { queue.iter_ptr(|n| &n.link) } {
+            Cond::signalAndRemoveQueueNode(&mut queue, unsafe { &*curr });
         }
     }
 }

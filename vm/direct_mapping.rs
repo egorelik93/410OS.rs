@@ -16,12 +16,12 @@ impl AddressMapping for DirectMapping {
     fn freeAddressMapping(addr: PhysicalAddress) {}
 
     /// Reserves space for a mapping.
-    fn reserveAddressMapping(count: u32) -> Result<(), ()> {
+    fn reserveAddressMapping(count: usize) -> Result<(), ()> {
         Ok(())
     }
 
     /// Frees reserved space.
-    fn unreserveAddressMapping(count: u32) {}
+    fn unreserveAddressMapping(count: usize) {}
 
     /// Allocates previously reserved space for a mapping.
     fn fulfillAddressMapping(addr: LogicalAddress) -> Option<PhysicalAddress> {

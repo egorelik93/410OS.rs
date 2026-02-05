@@ -2,9 +2,10 @@
 
 use core::cell::{Cell, UnsafeCell};
 use core::ffi::c_void;
+use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicU32};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::variable_queue::Link;
 use crate::task::TaskBlock;
 use crate::registers::*;
@@ -81,18 +82,64 @@ unsafe impl Send for ThreadBlock {}
 
 impl ThreadBlock {
     pub(super) fn link(&self) -> &ThreadBlockLink {
-        unsafe { &self.0.get().link }
+        &self.link
     }
 
     pub(super) fn scheduleLink(&self) -> &ThreadBlockLink {
-        unsafe { &self.0.get().scheduleLink }
+        &self.scheduleLink
     }
 
     pub(super) fn taskLink(&self) -> &ThreadBlockLink {
-        unsafe { &self.0.get().taskLink }
+        &self.taskLink
     }
 }
 
 
 pub use super::scheduler::getNextThread;
 pub use super::manager::getActiveThreadByTid;
+
+/// An identifier for a thread.
+///
+/// Not in the original C implementation, which directly used pointers to ThreadBlocks
+/// for this.
+#[derive(Debug, Eq, PartialEq)]
+pub struct ThreadHandle(NonNull<ThreadBlock>);
+
+unsafe impl Send for ThreadHandle {}
+
+impl ThreadHandle {
+    pub unsafe fn from_raw(thread: *const ThreadBlock) -> ThreadHandle {
+        unsafe { ThreadHandle(NonNull::new_unchecked(thread.cast_mut())) }
+    }
+
+    pub unsafe fn into_raw(self) -> *const ThreadBlock {
+        self.0.as_ptr().cast()
+    }
+}
+
+impl ThreadBlock {
+    pub fn handle(&self) -> ThreadHandle {
+        self.refCount.fetch_add(1, Ordering::AcqRel);
+        ThreadHandle(NonNull::from_ref(self))
+    }
+}
+
+impl Deref for ThreadHandle {
+    type Target = ThreadBlock;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.0.as_ref() }
+    }
+}
+
+impl Clone for ThreadHandle {
+    fn clone(&self) -> ThreadHandle {
+        self.handle()
+    }
+}
+
+impl Drop for ThreadHandle {
+    fn drop(&mut self) {
+        self.refCount.fetch_sub(1, Ordering::AcqRel);
+    }
+}

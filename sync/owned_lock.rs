@@ -76,20 +76,24 @@ impl<T> OwnedLock<T> {
     /// Attempt to lock an OwnedLock object
     pub fn tryLock(&self) -> Result<OwnedLockGuard<T>, Option<ThreadHandle>> {
         if !try_lock(&self.status) {
-            self.owner.store(getCurrentThread().map_or(null_mut(), |p: &ThreadBlock| p.handle().get()), Ordering::Release);
+            self.owner.store(getCurrentThread().map_or(
+                    null_mut(),
+                |p: &ThreadBlock| unsafe { ThreadHandle::into_raw(p.handle()).cast_mut() }),
+                Ordering::Release);
         }
 
-        let owner = ThreadHandle::new(self.owner.load(Ordering::Acquire));
-        if owner == getCurrentThread().handle() && !self.guardCreated.get() {
+        let owner = self.owner.load(Ordering::Acquire);
+        if owner == getCurrentThread().map_or(null_mut(), |t| (&raw const *t).cast_mut()) && !self.guardCreated.get() {
             self.guardCreated.set(true);
             Ok(OwnedLockGuard(self))
         } else {
-            Err(owner)
+            Err(self.owner())
         }
     }
 
     fn owner(&self) -> Option<ThreadHandle> {
-        ThreadHandle::new(self.owner.load(Ordering::Acquire))
+        let owner = self.owner.load(Ordering::Acquire);
+        if owner.is_null() { None } else { Some(unsafe { (&*owner).handle() }) }
     }
 
     /// Waits until we own the lock.
@@ -106,7 +110,7 @@ impl<T> OwnedLock<T> {
             } else {
                 let guard = disableInterrupts();
                 let owner = self.owner();
-                yieldThreadWithoutInterrupts(&guard, owner);
+                yieldThreadWithoutInterrupts(&guard, owner.as_ref());
             }
         })
     }
@@ -126,7 +130,7 @@ impl<T> OwnedLock<T> {
             match self.tryLock() {
                 Ok(guard) => return guard,
                 Err(owner) => {
-                    if owner == thread {
+                    if owner == thread.map(|t| t.handle()) {
                         lprintf!("Warning: Guard for lock {} was already created", self);
 
                         while self.guardCreated.get() {
@@ -146,8 +150,9 @@ pub struct OwnedLockGuard<'a, T>(&'a OwnedLock<T>);
 
 impl<T> OwnedLockGuard<'_, T> {
     /// Transfer an owned lock to another thread
-    pub fn transferLockTo(self, thread: NonNull<ThreadBlock>) {
-        self.0.owner.store(thread.as_ptr(), Ordering::Release);
+    pub fn transferLockTo(self, thread: ThreadHandle) {
+        let owner = self.0.owner.swap(unsafe { ThreadHandle::into_raw(thread).cast_mut() }, Ordering::AcqRel);
+        if !owner.is_null() { unsafe { drop(ThreadHandle::from_raw(owner)) } };
         mem::forget(self);
     }
 }
@@ -173,7 +178,8 @@ impl<T> DerefMut for OwnedLockGuard<'_, T> {
 impl<T> Drop for OwnedLockGuard<'_, T> {
     /// Unlock an OwnedLock
     fn drop(&mut self) {
-        self.0.owner.store(null_mut(), Ordering::Release);
+        let owner = self.0.owner.swap(null_mut(), Ordering::AcqRel);
+        if !owner.is_null() { unsafe { drop(ThreadHandle::from_raw(owner)) } };
         unlock(&self.0.status);
     }
 }

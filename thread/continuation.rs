@@ -32,5 +32,3 @@ unsafe extern "cdecl" {
     /// someone else calls continueFromContinuation on cont.
     pub fn callWithCurrentContinuation(next: unsafe extern "cdecl" fn(cont: Continuation, args: *mut c_void) -> !, args: *mut c_void);
 }
-    
-core::arch::global_asm!(include_str!("continuation.S"), options(att_syntax));

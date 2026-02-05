@@ -1,14 +1,16 @@
 //! Manage the various thread collections on link.
 
 use core::pin::Pin;
+use core::{mem, ptr};
+use core::sync::atomic::Ordering;
 
-use crate::sync::rwlock::RWLock;
+use crate::sync::rwlock::{RWLock, WriteGuard};
 use crate::variable_queue::*;
 
-use super::{Thread, ThreadBlock, ThreadQueue};
+use super::{ThreadBlock, ThreadHandle, ThreadQueue};
 
 pub struct ThreadCollection {
-    queue: RWLock<ThreadQueue>
+    pub queue: RWLock<ThreadQueue>
 }
 
 impl ThreadCollection {
@@ -20,15 +22,16 @@ impl ThreadCollection {
     }
 
     /// Insert a thread into a collection.
-    pub fn insertThread<'a>(&'a self, thread: Pin<Thread>) -> Pin<&'a ThreadBlock> {
+    pub unsafe fn insertThread(&self, thread: *const ThreadBlock) -> &ThreadBlock {
         let mut guard = self.queue.lockWrite();
-        unsafe { insert_tail!(&mut guard, thread.as_ref(), link) }
+        unsafe { insert_tail!(&mut guard, thread, link) }
     }
 
     /// Remove a thread from a collection.
-    pub fn removeThread<'a>(&self, thread: Pin<&mut ThreadBlock>) -> Pin<Thread> {
-        let mut guard = self.queue.lockRead();
-        remove!(&mut guard, thread.as_ref(), link);
-        todo!()
+    pub fn removeThread(&self, thread: &ThreadBlock) -> Option<*const ThreadBlock> {
+        assert!(thread.refCount.load(Ordering::Acquire) == 1);
+        
+        let mut guard = self.queue.lockWrite();
+        remove!(&mut guard, &thread, link)
     }
 }

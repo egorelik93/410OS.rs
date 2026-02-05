@@ -36,6 +36,8 @@ pub struct RWLock<T> {
     data: UnsafeCell<T>
 }
 
+unsafe impl<T> Sync for RWLock<T> where T: Send {}
+
 #[derive(Debug)]
 struct RWLockStatus {
     readerCount: u32,

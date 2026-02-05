@@ -3,6 +3,7 @@
 use core::cell::Cell;
 use core::ffi::c_void;
 use core::ptr::{self, null_mut};
+use core::sync::atomic::{AtomicBool, AtomicU32};
 use crate::registers::*;
 use crate::task::TaskBlock;
 use crate::variable_queue::Link;
@@ -31,15 +32,16 @@ impl ThreadBlock {
             kernelStackOffset: Cell::new(KERNEL_STACK_SIZE),
             link: Link::new(),
             free: Cell::new(false),
-            scheduled: Cell::new(false),
-            userDescheduledMutex: null_mut(), //(),
-            userDescheduled: false,
+            scheduled: AtomicBool::new(false),
+            userDescheduled: AtomicBool::new(false),
             scheduleLink: Link::new(),
             taskLink: Link::new(),
-            suspendedUserState: null_mut(),
-            swexnHandler: null_mut(),
+            suspendedUserState: Cell::new(null_mut()),
+            swexnHandler: Cell::new(null_mut()),
             esp3: null_mut(),
-            exnUreg: null_mut()
+            exnUreg: null_mut(),
+            refCount: AtomicU32::new(0),
+            disabledInterruptsRefCount: Cell::new(0)
         }
     }
 
@@ -62,7 +64,7 @@ impl ThreadBlock {
             let threadState: &mut InitialThreadState = &mut *ptr::from_mut(self).byte_add(self.kernelStackOffset.get()).cast();
 
             threadState.state = *state;
-            self.suspendedUserState = &raw mut threadState.state;
+            self.suspendedUserState.set(&raw mut threadState.state);
 
             threadState.returnAddress = exitKernelMode;
         }

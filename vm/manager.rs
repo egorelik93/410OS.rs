@@ -37,7 +37,7 @@ pub fn inKernelDirectory() -> bool {
 /// Return a zeroed page
 #[inline(always)]
 pub fn zeroedPage() -> &'static Page {
-    unsafe { &*_zeroedPage.get().unwrap() }
+    unsafe { &*_zeroedPage }
 }
 
 /// Return address of start of the next page to the input address
@@ -80,7 +80,7 @@ pub unsafe fn initVirtualMemory() {
     }
 
     unsafe {
-        *(&mut *_kernelDirectory) = kernelDirectory;
+        _kernelDirectory = Box::leak(kernelDirectory);
     }
 
     todo!();

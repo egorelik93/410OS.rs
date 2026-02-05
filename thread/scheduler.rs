@@ -8,6 +8,7 @@
 //! We thus use disable_interrupts
 //! to prevent the timer from running.
 
+use core::ops::Deref;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -84,13 +85,13 @@ pub fn scheduleThread(disabledInterrupts : &DisabledInterruptsGuard, thread: &Th
         match &sched_.next {
             None => {
                 unsafe {
-                    let thread = insert_tail!(&mut sched_.queue, thread.deref_pin(), scheduleLink);
+                    let thread = insert_tail!(&mut sched_.queue, &**thread, scheduleLink);
                 }
                 sched_.next = Some(thread.handle());
             },
             Some(next) => {
                 unsafe {
-                    insert_after!(&mut sched_.queue, &next.clone(), thread.deref_pin(), scheduleLink);
+                    insert_after!(&mut sched_.queue, &**next, &**thread, scheduleLink);
                 }
             }
         }
@@ -152,7 +153,7 @@ pub fn getScheduledThreadByTid(tid: i32) -> Option<ThreadHandle> {
 pub fn blockUntil(disabledInterrupts: &DisabledInterruptsGuard, cond: &AtomicBool) {
     let Some(thread) = getCurrentThread() else { return };
 
-    while !cond.load(Ordering::Release) {
+    while !cond.load(Ordering::Acquire) {
         descheduleThread(&disabledInterrupts, thread);
         yieldThreadWithoutInterrupts(&disabledInterrupts, None);
     }

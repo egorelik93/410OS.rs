@@ -23,7 +23,7 @@ use super::owned_lock::{self, OwnedLock, OwnedLockGuard};
 pub struct WaitListNode {
     link: Link<WaitListNode>,
     hasLock: AtomicBool,
-    thread: Option<NonNull<ThreadBlock>>
+    thread: Option<ThreadHandle>
 }
 
 pub type MutexWaitList = Head<WaitListNode>;
@@ -117,7 +117,7 @@ impl<T> Mutex<T> {
         let thisThreadWaitInfo = WaitListNode {
             hasLock: AtomicBool::new(false),
             link: Link::new(),
-            thread: thisThread
+            thread: thisThread.map(|t| t.handle())
         };
 
         // Update Waitlist
@@ -139,7 +139,7 @@ impl<T> Mutex<T> {
 
             let thisThreadWaitInfo = unsafe {
                 // Register yourself on the waitlist.
-                insert_tail!(&mut waitList, thisThreadWaitInfo.as_ref(), link)
+                insert_tail!(&mut waitList, &*thisThreadWaitInfo, link)
             };
 
             // Release access to the waitlist
@@ -157,7 +157,7 @@ impl<T> Mutex<T> {
                 match mutexResult {
                     Ok(guard) => break guard,
                     Err(mutexHolder) => {
-                        yieldThread(mutexHolder);
+                        yieldThread(mutexHolder.as_ref());
 
                         // Attempt to steal the lock.
                         mutexResult = self.mutexLock.tryLock();
@@ -238,7 +238,7 @@ impl<T> Drop for MutexGuard<'_, T> {
 
         // If the waitlist is empty, we indicate the mutex is now unlocked
         // without passing it on to anyone.
-        match waitList.front_ptr() {
+        match unsafe { waitList.front_unchecked() } {
             None => {
                 // Since the mutex is locked, no one is removing themself off the waitlist
                 // until the moment we've unlocked the status, at which point we're done.
@@ -253,7 +253,6 @@ impl<T> Drop for MutexGuard<'_, T> {
 
                 // Update Waitlist
 
-                let nextRunner = unsafe { &*nextRunner };
                 remove!(&mut waitList, nextRunner, link);
 
                 // Release access to the waitlist. Since the next runner
@@ -261,7 +260,7 @@ impl<T> Drop for MutexGuard<'_, T> {
                 drop(waitList);
 
                 // Triggers to the next runner they are ready to go.
-                unsafe { ManuallyDrop::take(&mut self.1).transferLockTo(nextRunner.thread.unwrap()) };
+                unsafe { ManuallyDrop::take(&mut self.1).transferLockTo(nextRunner.thread.as_ref().unwrap().handle()) };
                 nextRunner.hasLock.store(true, Ordering::Release);
             }
         }

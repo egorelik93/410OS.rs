@@ -32,7 +32,7 @@ impl PageDirectory {
     ///
     /// Not in the original implementation as a separate function,
     /// due to being more verbose in Rust.
-    fn is_cr3(&self) -> bool {
+    pub fn is_cr3(&self) -> bool {
         unsafe { get_cr3() as usize == from_direct_mapping(ptr::from_ref(self).cast_mut()) }
     }
 

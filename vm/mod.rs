@@ -11,6 +11,8 @@ pub(super) mod manager;
 pub(super) mod mapped_memory;
 pub(super) mod memory_alloc;
 pub(super) mod validate_memory;
+pub(super) mod hidden_memory;
+pub(super) mod memory_write;
 mod frame_alloc;
 mod invalidate_page;
 

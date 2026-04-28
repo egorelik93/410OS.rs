@@ -7,8 +7,9 @@ use core::sync::atomic::Ordering;
 use crate::sync::rwlock::{RWLock, WriteGuard};
 use crate::variable_queue::*;
 
-use super::{ThreadBlock, ThreadHandle, ThreadQueue};
+use super::{ThreadBlock, ThreadHandle, ThreadQueue, getCurrentTask, getCurrentThread};
 
+#[derive(Debug)]
 pub struct ThreadCollection {
     pub queue: RWLock<ThreadQueue>
 }
@@ -34,4 +35,23 @@ impl ThreadCollection {
         let mut guard = self.queue.lockWrite();
         remove!(&mut guard, &thread, link)
     }
+}
+
+/// Disassociate a thread with a task.
+pub fn removeThreadFromTask(thread: &ThreadBlock) {
+    if !thread.task.is_null() {
+        let mut taskThreads = unsafe { &*thread.task }.threadsOfTask().queue.lockWrite();
+        remove!(&mut taskThreads, thread, taskLink);
+    }
+}
+
+/// Checks if the current thread is the last one
+/// in the task.
+pub fn isLastThreadInTask() -> bool {
+    let thread = getCurrentThread().unwrap();
+    let task = getCurrentTask().unwrap();
+    let taskThreads = task.threadsOfTask().queue.lockRead();
+
+    let first = taskThreads.front();
+    first == Some(thread) && first.unwrap().taskLink().next().is_none()
 }

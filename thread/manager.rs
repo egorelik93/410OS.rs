@@ -1,18 +1,24 @@
 //! Global collections of threads.
 
 use core::alloc::Layout;
+use core::ffi::c_int;
 use core::mem::{self, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::sync::atomic::Ordering;
 
+use _410kern::seg::SEGSEL_KERNEL_CS;
 use alloc::alloc::{alloc, dealloc};
 
 use super::thread_internal::KERNEL_STACK_SIZE;
-use super::{ThreadBlock, ThreadCollection, ThreadHandle, getCurrentThread, scheduleThread};
+use super::{ThreadBlock, ThreadCollection, ThreadHandle, getCurrentThread, getCurrentTask, scheduleThread};
+use crate::idt_entry::*;
 use crate::registers::SuspendedState;
 use crate::sync::disable_interrupts::disableInterrupts;
 use crate::idgen::IDGenerator;
+use crate::task::{TaskBlock, task_vanish};
+use crate::thread::blockUntilRescheduled;
+use crate::syscall_int::*;
 
 
 static tidGen: IDGenerator = IDGenerator::new(1);
@@ -25,11 +31,53 @@ static activeColl: ThreadCollection = ThreadCollection::new();
 static freeColl: ThreadCollection = ThreadCollection::new();
 
 
+/* Kernel functions */
+
+/// Initialize the threading system.
+pub unsafe fn installThreadManager() {
+    unsafe {
+        *IDT().add(GETTID_INT) = trapGate(
+            USER_PRIVILEGE,
+            crate::syscall::gettidHandlerWrapper,
+            SEGSEL_KERNEL_CS);
+
+        *IDT().add(THREAD_FORK_INT) = trapGate(
+            USER_PRIVILEGE,
+            crate::syscall::threadForkHandlerWrapper,
+            SEGSEL_KERNEL_CS);
+
+        *IDT().add(VANISH_INT) = trapGate(
+            USER_PRIVILEGE,
+            crate::syscall::threadForkHandlerWrapper,
+            SEGSEL_KERNEL_CS);
+        *IDT().add(YIELD_INT) = trapGate(
+            USER_PRIVILEGE,
+            crate::syscall::yieldHandlerWrapper,
+            SEGSEL_KERNEL_CS);
+
+        *IDT().add(DESCHEDULE_INT) = trapGate(
+            USER_PRIVILEGE,
+            crate::syscall::descheduleHandlerWrapper,
+            SEGSEL_KERNEL_CS);
+
+        *IDT().add(MAKE_RUNNABLE_INT) = trapGate(
+            USER_PRIVILEGE,
+            crate::syscall::descheduleHandlerWrapper,
+            SEGSEL_KERNEL_CS);
+
+        *IDT().add(SWEXN_INT) = trapGate(
+            USER_PRIVILEGE,
+            crate::syscall::swexnHandlerWrapper,
+            SEGSEL_KERNEL_CS);
+    }
+}
+
 /// An (owned) pointer to the full thread allocation, including the kernel stack.
 ///
 /// Not in the original C implementation, which directly used pointers to ThreadBlocks
 /// for this.
-struct Thread(*mut ThreadBlock);
+#[derive(Debug)]
+pub struct Thread(*mut ThreadBlock);
 
 impl Thread {
     unsafe fn from_raw(thread: *mut ThreadBlock) -> Self {
@@ -171,12 +219,64 @@ pub fn getActiveThreadByTid(tid: i32) -> Option<ThreadHandle> {
 /// The new thread will be set to return to the same point
 /// as in the original in user mode,
 /// but returning a value of 0.
-pub fn forkThreadToTask(task: ()) -> Thread {
-    todo!()
+pub fn forkThreadToTask(task: *const TaskBlock) -> Option<Thread> {
+    let mut new = Thread::new()?;
+
+    let curr = getCurrentThread().unwrap();
+
+    new.load(task, unsafe { &*curr.suspendedUserState.get() });
+    unsafe { &mut *new.suspendedUserState.get() }.reg.eax = 0;
+    new.inKernelDirectory.set(false);
+
+    new.swexnHandler.set(curr.swexnHandler.get());
+    new.esp3.set(curr.esp3.get());
+    new.exnUreg.set(curr.exnUreg.get());
+
+    Some(new)
 }
 
 /// Sets the suspended user state pointer
 /// of the current thread.
-pub(super) fn setSuspendedState(state: *mut SuspendedState) {
+pub fn setSuspendedUserState(state: *mut SuspendedState) {
     getCurrentThread().map(|t| t.suspendedUserState.set(state));
+}
+
+
+/* Syscalls */
+
+/// Obtain tid of the currently running thread.
+pub fn gettid() -> c_int {
+    getCurrentThread().map_or(-1, |t| t.tid)
+}
+
+/// Kill the currently running thread.
+pub fn vanish() -> ! {
+    let thread = getCurrentThread().unwrap();
+    let task = getCurrentTask().unwrap();
+    let taskThreads = task.threadsOfTask();
+
+    let mut queue = taskThreads.queue.lockWrite();
+
+    let first = queue.front();
+    if first == Some(thread) && first.unwrap().taskLink().next().is_none() {
+        drop(queue);
+        task_vanish()
+    } else {
+        remove!(&mut queue, thread, taskLink);
+        drop(queue);
+
+        freeThread(thread);
+        blockUntilRescheduled(&disableInterrupts());
+        unreachable!()
+    }
+}
+
+/// Fork the current thread.
+pub fn thread_fork() -> c_int {
+    let old = getCurrentThread().unwrap();
+    let Some(new) = forkThreadToTask(old.task) else { return -1; };
+
+    let tid = new.tid;
+    startThread(new);
+    tid
 }

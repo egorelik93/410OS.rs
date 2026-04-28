@@ -6,6 +6,9 @@ use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use crate::swexn::SwexnHandler;
+use crate::ureg::UReg;
+use crate::sync::mutex::Mutex;
 use crate::variable_queue::Link;
 use crate::task::TaskBlock;
 use crate::registers::*;
@@ -27,7 +30,7 @@ pub struct ThreadBlock {
     pub(super) tid: i32,
 
     /// Task the thread is running on.
-    pub(super) task: *mut TaskBlock,
+    pub(super) task: *const TaskBlock,
 
     /// Whether the thread was in the kernel directory before being suspended
     pub(super) inKernelDirectory: Cell<bool>,
@@ -46,7 +49,7 @@ pub struct ThreadBlock {
     pub(super) scheduled: AtomicBool,
 
     /// Was the thread descheduled by the user.
-    pub(super) userDescheduled: AtomicBool,
+    pub(super) userDescheduled: Mutex<bool>,
 
     /// Scheduling Queue link.
     pub(super) scheduleLink: ThreadBlockLink,
@@ -58,13 +61,13 @@ pub struct ThreadBlock {
     pub(super) suspendedUserState: Cell<*mut SuspendedState>,
 
     /// Registered swexn
-    pub(super) swexnHandler: Cell<*mut c_void>, // ...,
+    pub(crate) swexnHandler: Cell<Option<SwexnHandler>>,
 
     /// Exception stack
-    pub(super) esp3: *mut c_void,
+    pub(crate) esp3: Cell<*mut c_void>,
 
     /// Space for ureg_t object on exception stack
-    pub(super) exnUreg: *mut c_void, // ureg_t
+    pub(crate) exnUreg: Cell<*mut UReg>,
 
     /// A count of handles and other references to this object.
     ///
@@ -91,6 +94,12 @@ impl ThreadBlock {
 
     pub(super) fn taskLink(&self) -> &ThreadBlockLink {
         &self.taskLink
+    }
+}
+
+impl PartialEq for ThreadBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self as *const ThreadBlock == other as *const ThreadBlock
     }
 }
 

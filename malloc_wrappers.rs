@@ -20,7 +20,9 @@ pub fn memalign(alignment: usize, size: usize) -> *mut u8 {
     unsafe { _memalign(alignment, size) }
 }
 
-/// Allocates memory on the heap for an array, and zeroes it out
+/**
+Allocates memory on the heap for an array, and zeroes it out
+*/
 pub fn calloc(nelt: usize, eltsize: usize) -> *mut u8 {
     let guard = memoryMutex.lock();
     unsafe { _calloc(nelt, eltsize) }
@@ -62,9 +64,10 @@ pub fn sfree(buf: *mut u8, size: usize) {
 /// This was not in the original C implementation, but
 /// allows us to use Rust niceties like Box.
 /// This is thanks to the relatively recent no_global_oom_handling,
-/// which lets use a safe non-OOM version of the alloc crate.
+/// which lets us use a safe non-OOM version of the alloc crate.
 /// This was not available when I first attempted a Rust port,
 /// and is exactly where I stalled.
+#[derive(Debug)]
 struct MallocAlloc;
 
 unsafe impl GlobalAlloc for MallocAlloc {

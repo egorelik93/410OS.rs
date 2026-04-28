@@ -60,6 +60,13 @@ impl<T> RWLock<T> {
             data: UnsafeCell::new(data)
         }
     }
+
+    /// Mutably borrow the underlying data.
+    ///
+    /// This did not exist in the original implementation.
+    pub fn get_mut(&mut self) -> &mut T {
+        self.data.get_mut()
+    }
 }
 
 impl<T> Drop for RWLock<T> {

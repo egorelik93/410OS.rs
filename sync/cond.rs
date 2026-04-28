@@ -72,6 +72,8 @@ pub struct Cond {
     queue: Mutex<CondQueue>
 }
 
+unsafe impl Sync for Cond {}
+
 
 impl Cond {
     /// Create a cond var.

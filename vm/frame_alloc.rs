@@ -37,7 +37,7 @@ static allocator: FrameAllocator = FrameAllocator(Mutex::new(FrameAllocatorInner
 ///
 /// In the original, this function did not take over kernelDirectory,
 /// but given the usage it works better with borrowing.
-pub fn initFrameAllocator(mut kernelDirectory: Box<PageDirectory>, start: PhysicalAddress, end: PhysicalAddress) -> *const PageDirectory {
+pub unsafe fn initFrameAllocator(mut kernelDirectory: Box<PageDirectory>, start: PhysicalAddress, end: PhysicalAddress) -> *const PageDirectory {
     let mut guard = allocator.0.lock();
     guard.currFrame = start;
     guard.regionStart = start;

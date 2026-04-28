@@ -2,12 +2,14 @@
 
 use core::ffi::c_void;
 use core::ptr::{self, NonNull, null_mut};
-use _410kern::cr::set_esp0;
+use _410kern::asm::disable_interrupts;
+use _410kern::cr::{set_cr3, set_esp0};
 use super::continuation::{callWithCurrentContinuation, continueFromContinuation};
 use super::thread_internal::{KERNEL_STACK_SIZE, getNextThread};
 use super::{continuation::Continuation, *};
 use crate::sync::disable_interrupts::{DisabledInterruptsGuard, disableInterrupts};
-use crate::task::TaskBlock;
+use crate::task::{TaskBlock, switchToTask};
+use crate::virtual_memory::{inKernelDirectory, kernelDirectory};
 
 static mut _currentThread: *const ThreadBlock = null_mut();
 
@@ -17,18 +19,19 @@ pub fn getCurrentThread<'a>() -> Option<&'a ThreadBlock> {
 }
 
 /// Obtain the currently set task.
-pub fn getCurrentTask() -> Option<NonNull<TaskBlock>> {
+pub fn getCurrentTask<'a>() -> Option<&'a TaskBlock> {
     let thread = getCurrentThread()?;
-    NonNull::new(thread.task())
+    unsafe { Some(&*thread.task()) }
 }
+
 
 /// Update a thread to store the given continuation.
 fn saveContinuationTo(thread: &ThreadBlock, cont: Continuation) {
     let kernelStackOffset = unsafe { cont.byte_offset_from_unsigned((&raw const *thread).cast_mut()) };
     thread.kernelStackOffset.set(kernelStackOffset);
-    unimplemented!()
-    // thread.inKernelDirectory = (get_cr3() == kernelDirectory())
+    thread.inKernelDirectory.set(inKernelDirectory());
 }
+
 
 /// Save the given continuation and switch to the given
 /// thread.
@@ -108,7 +111,16 @@ pub unsafe fn continueThread(thread: &ThreadBlock) -> ! {
         set_esp0((&raw const *thread).byte_add(KERNEL_STACK_SIZE).addr() as u32);
         let cont: Continuation = (&raw const *thread).byte_add(thread.kernelStackOffset.get()).cast_mut().cast();
 
-        //
+        if thread.inKernelDirectory.get() {
+            unsafe { set_cr3(kernelDirectory().addr() as u32) };
+            thread.inKernelDirectory.set(false);
+        } else if unsafe { &*oldThread }.task != thread.task || inKernelDirectory() {
+            switchToTask(unsafe { &*thread.task });
+        }
+
+        if thread.disabledInterruptsRefCount.get() > 0 {
+            unsafe { disable_interrupts(); }
+        }
 
         continueFromContinuation(cont)
     }

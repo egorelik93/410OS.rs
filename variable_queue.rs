@@ -22,6 +22,8 @@ pub struct Link<Elem> {
     phantomPinned: PhantomPinned
 }
 
+unsafe impl<Elem: Send> Send for Link<Elem> {}
+
 
 impl<Elem> Head<Elem> {
     /// Creates the head of a queue

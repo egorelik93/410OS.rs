@@ -2,9 +2,10 @@
 
 use core::cell::Cell;
 use core::ffi::c_void;
-use core::ptr::{self, null_mut};
+use core::ptr::{self, null, null_mut};
 use core::sync::atomic::{AtomicBool, AtomicU32};
 use crate::registers::*;
+use crate::sync::mutex::Mutex;
 use crate::task::TaskBlock;
 use crate::variable_queue::Link;
 
@@ -27,19 +28,19 @@ impl ThreadBlock {
     pub(super) fn new() -> ThreadBlock {
         ThreadBlock {
             tid: 0,
-            task: null_mut(),
+            task: null(),
             inKernelDirectory: Cell::new(false),
             kernelStackOffset: Cell::new(KERNEL_STACK_SIZE),
             link: Link::new(),
             free: Cell::new(false),
             scheduled: AtomicBool::new(false),
-            userDescheduled: AtomicBool::new(false),
+            userDescheduled: Mutex::new(false),
             scheduleLink: Link::new(),
             taskLink: Link::new(),
             suspendedUserState: Cell::new(null_mut()),
-            swexnHandler: Cell::new(null_mut()),
-            esp3: null_mut(),
-            exnUreg: null_mut(),
+            swexnHandler: Cell::new(None),
+            esp3: Cell::new(null_mut()),
+            exnUreg: Cell::new(null_mut()),
             refCount: AtomicU32::new(0),
             disabledInterruptsRefCount: Cell::new(0)
         }
@@ -51,12 +52,12 @@ impl ThreadBlock {
     }
 
     /// Get task associated with a thread.
-    pub fn task(&self) -> *mut TaskBlock {
-        self.task
+    pub fn task(&self) -> *const TaskBlock {
+        unsafe { &*self.task }
     }
 
     /// Load an initial state for the kernel stack.
-    pub fn load(&mut self, task: *mut TaskBlock, state: *mut SuspendedState) {
+    pub fn load(&mut self, task: *const TaskBlock, state: &SuspendedState) {
         self.task = task;
         self.kernelStackOffset.set(KERNEL_STACK_SIZE - size_of::<InitialThreadState>());
 

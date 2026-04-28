@@ -7,6 +7,8 @@ mod context_switch;
 mod scheduler;
 mod thread_collection;
 mod manager;
+mod swexn_handler;
+pub mod syscall_handler;
 
 use core::ops::{Deref, DerefMut};
 use core::pin::Pin;
@@ -17,18 +19,29 @@ use core::sync::atomic::Ordering;
 pub use thread_internal::ThreadBlock;
 
 /// Thread Management API
-/*pub use manager::{
+pub use manager::{
+    Thread,
     installThreadManager,
-}*/
+    freeThread,
+    startThread,
+    forkThreadToTask,
+    setSuspendedUserState
+};
 
 /// Thread Collection API
-pub use thread_collection::ThreadCollection;
+pub use thread_collection::{
+    ThreadCollection,
+    removeThreadFromTask,
+    isLastThreadInTask
+};
+pub use manager::clearFreeThreadCollection;
 
 /// Scheduling API
 pub use scheduler::{
     scheduleThread,
     descheduleThread,
-    blockUntil
+    blockUntil,
+    blockUntilRescheduled
 };
 
 /// Mode Switch
@@ -42,6 +55,18 @@ pub use context_switch::{
     yieldThreadTo,
     yieldThreadWithoutInterrupts,
     continueThread
+};
+
+/// Syscalls
+pub use manager::{
+    gettid,
+    thread_fork,
+    vanish
+};
+pub use scheduler::{
+    deschedule,
+    make_runnable,
+    _yield
 };
 
 use crate::sync::mutex::Mutex;

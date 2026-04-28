@@ -1,6 +1,6 @@
 //! Checks whether a given address is valid.
 
-use core::ffi::CStr;
+use core::ffi::{CStr, c_char};
 use core::u8;
 
 use _410kern::cr::get_cr3;
@@ -60,9 +60,9 @@ pub unsafe fn isUserWritableAddr(addr: LogicalAddress, len: usize) -> bool {
 }
 
 /// Return the readable length of a string.
-pub unsafe fn readableStringLen(str: *const CStr) -> Option<usize> {
+pub unsafe fn readableStringLen(str: *const c_char) -> Option<usize> {
     let mut len = 0;
-    let mut c = unsafe { str.as_ref()?.as_ptr() };
+    let mut c = str;
 
     unsafe {
         while isUserReadableAddr(LogicalAddress(c.expose_provenance()), 1) {

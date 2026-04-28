@@ -6,10 +6,9 @@ use elain::Align;
 mod vm;
 use vm::*;
 
-#[path = "../spec/common_kern.rs"]
-mod common_kern;
+use crate::common_kern;
 
-use core::ptr;
+use core::ptr::{self, without_provenance_mut};
 
 use _410kern::page::PAGE_SIZE;
 
@@ -77,6 +76,21 @@ impl LogicalAddress {
     /// that has been replaced by Rust's byte_offset method.
     pub fn offset(self, bytes: usize) -> LogicalAddress {
         LogicalAddress(self.0 + bytes)
+    }
+
+    /// Return a LogicalAddress aligned on a page boundary.
+    ///
+    /// Replaces some direct uses of PAGE_ALIGN in the original implementation
+    #[inline(always)]
+    pub fn page_align(self) -> Self {
+        LogicalAddress(PAGE_ALIGN(self.0))
+    }
+
+    /// Checks if an address if page-aligned.
+    ///
+    /// Replaced direct version of isPageAligned in the original implementations
+    pub fn is_page_aligned(self) -> bool {
+        isPageAligned(without_provenance_mut::<u8>(self.0))
     }
 }
 
@@ -195,9 +209,9 @@ pub fn foreach_entry_in(start: LogicalAddress, end: LogicalAddress) -> EntryIter
 }
 
 pub type PhysicalAddress = usize;
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
-pub struct LogicalAddress(usize);
+pub struct LogicalAddress(pub usize);
 #[repr(C)]
 #[derive(Debug)]
 pub struct Page([u8; PAGE_SIZE], Align<PAGE_SIZE>);
@@ -216,7 +230,7 @@ pub struct PageDirectory([PageEntry; NUM_PAGE_ENTRIES], Align<PAGE_SIZE>);
 /// reflecting cases that were only taken into account haphazardly.
 /// When not properly accounted for, this function is extremely dangerous.
 #[deprecated(note = "This function is dangerous and uses should be redesigned")]
-unsafe fn assume_direct_mapping<T>(addr: PhysicalAddress) -> *mut T {
+pub unsafe fn assume_direct_mapping<T>(addr: PhysicalAddress) -> *mut T {
     ptr::with_exposed_provenance_mut(addr)
 }
 
@@ -226,7 +240,7 @@ unsafe fn assume_direct_mapping<T>(addr: PhysicalAddress) -> *mut T {
 /// As with that function, marks a design flaw in the original implementation.
 /// If I come back to this beyond just porting, should be the first issue addressed.
 #[deprecated(note = "This function is dangerous and uses should be redesigned")]
-unsafe fn from_direct_mapping<T>(ptr: *mut T) -> PhysicalAddress {
+pub unsafe fn from_direct_mapping<T>(ptr: *mut T) -> PhysicalAddress {
     ptr.expose_provenance()
 }
 
@@ -238,6 +252,10 @@ pub use address_mapping::AddressMapping;
 
 pub use alloc_mapping::AllocMapping;
 pub use direct_mapping::DirectMapping;
+
+/* Page API */
+
+pub use manager::zeroedPage;
 
 
 /* Page Directories */
@@ -260,6 +278,13 @@ pub use memory_alloc::{
 pub use manager::nextAddress;
 
 
+/* Mass Memory Writing */
+
+pub use memory_write::{
+    copyMemoryRange,
+    zeroedMemoryRange
+};
+
 /* Memory Validation */
 
 pub use validate_memory::{
@@ -269,3 +294,10 @@ pub use validate_memory::{
     isUnmappedAddr,
     readableStringLen
 };
+
+
+/* Installers */
+
+pub use manager::initVirtualMemory;
+
+pub use manager::pageFaultHandler;

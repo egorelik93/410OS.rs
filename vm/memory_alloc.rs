@@ -15,7 +15,7 @@ use super::vm_internal::invalidatePage;
 /// Check whether it is safe to follow and mutate within the page directory.
 ///
 /// Not in the original implementation.
-fn isSafe(dir: &PageDirectory) -> bool {
+pub(super) fn isSafe(dir: &PageDirectory) -> bool {
     (unsafe { (get_cr3() as usize) == from_direct_mapping(kernelDirectory().cast_mut()) })
         && (ptr::from_ref(dir) != kernelDirectory())
 }

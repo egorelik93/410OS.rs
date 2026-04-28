@@ -8,6 +8,7 @@
 //! We thus use disable_interrupts
 //! to prevent the timer from running.
 
+use core::ffi::c_int;
 use core::ops::Deref;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -15,10 +16,12 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::sync::disable_interrupts::{self, DisabledInterruptsGuard, disableInterrupts};
 use crate::sync::owned_lock::{OwnedLock, OwnedLockGuard};
 use crate::sync::mutex::Mutex;
+use crate::task::lockReadFromMemory;
 use crate::variable_queue::Head;
+use crate::virtual_memory::{LogicalAddress, isUserReadableAddr};
 
 use super::context_switch::yieldThreadWithoutInterrupts;
-use super::{ThreadBlock, ThreadHandle, getCurrentThread};
+use super::{ThreadBlock, ThreadHandle, getCurrentThread, thread, yieldThread, yieldThreadTo};
 use super::thread_internal::getActiveThreadByTid;
 
 type ScheduledThreads = Head<ThreadBlock>;
@@ -146,10 +149,6 @@ pub fn getScheduledThreadByTid(tid: i32) -> Option<ThreadHandle> {
 }
 
 /// Blocks the thread until a condition is met.
-///
-/// If given NULL, will only deschedule until being rescheduled.
-///
-/// This function will only ever return with interrupts enabled.
 pub fn blockUntil(disabledInterrupts: &DisabledInterruptsGuard, cond: &AtomicBool) {
     let Some(thread) = getCurrentThread() else { return };
 
@@ -157,6 +156,13 @@ pub fn blockUntil(disabledInterrupts: &DisabledInterruptsGuard, cond: &AtomicBoo
         descheduleThread(&disabledInterrupts, thread);
         yieldThreadWithoutInterrupts(&disabledInterrupts, None);
     }
+}
+
+/// Blocks the thread until rescheduled.
+///
+/// This was originally the NULL case of blockUntil.
+pub fn blockUntilRescheduled(disabledInterrupts: &DisabledInterruptsGuard) {
+    blockUntil(disabledInterrupts, &getCurrentThread().unwrap().scheduled);
 }
 
 
@@ -173,7 +179,7 @@ pub fn blockUntil(disabledInterrupts: &DisabledInterruptsGuard, cond: &AtomicBoo
 ///
 /// 0 if successfully scheduled,
 /// -1 otherwise.
-fn make_runnable(tid: i32) -> i32 {
+pub fn make_runnable(tid: i32) -> i32 {
     if tid < 0 {
         return -1;
     }
@@ -181,5 +187,72 @@ fn make_runnable(tid: i32) -> i32 {
     let Some(thread) = getActiveThreadByTid(tid)
     else { return -1; };
 
-    todo!()
+    let mut userDescheduled = thread.userDescheduled.lock();
+
+    if !*userDescheduled || thread.scheduled.load(Ordering::Acquire) {
+        return -1;
+    }
+
+    let disabledInterrupts = disableInterrupts();
+    if scheduleThread(&disabledInterrupts, &thread).is_ok() {
+        *userDescheduled = false;
+        return 0;
+    } else {
+        return -1;
+    }
+}
+
+
+/// Deschedule a thread.
+///
+/// Atomically checks reject and deschedules the current
+/// thread if 0. Unlike descheduleSelf, this is marked
+/// as being user triggered.
+pub fn deschedule(reject: *mut c_int) -> c_int {
+    let thread = getCurrentThread().unwrap();
+
+    let dir = lockReadFromMemory();
+    let mut userDescheduled = thread.userDescheduled.lock();
+
+    if unsafe { !isUserReadableAddr(LogicalAddress(reject.addr()), size_of::<c_int>()) } {
+        return -1;
+    }
+
+
+    let disabledInterrupts = disableInterrupts();
+
+    let reject = unsafe { &mut *reject };
+    if *reject != 0 {
+        return 0;
+    }
+
+    let Ok(()) = descheduleThread(&disabledInterrupts, &thread) else { return -1; };
+
+    *userDescheduled = true;
+    drop(userDescheduled);
+
+    blockUntilRescheduled(&disabledInterrupts);
+    0
+}
+
+
+/// Yield to a thread.
+pub fn _yield(tid: c_int) -> c_int {
+    if tid == -1 {
+        yieldThread(None);
+        return 0;
+    }
+
+    if tid < 0 {
+        return -1;
+    }
+
+    let thread = getScheduledThreadByTid(tid);
+
+    if let Some(thread) = thread && thread.scheduled.load(Ordering::Acquire) {
+        let disabledInterrupts = disableInterrupts();
+        if yieldThreadTo(&disabledInterrupts, &thread).is_ok() { 0 } else { -1 }
+    } else {
+        -1
+    }
 }

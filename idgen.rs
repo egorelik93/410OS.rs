@@ -3,6 +3,7 @@
 use crate::sync::mutex::Mutex;
 
 /// Used to generate IDs.
+#[derive(Debug)]
 pub struct IDGenerator {
     counter: Mutex<i32>,
     start: i32,

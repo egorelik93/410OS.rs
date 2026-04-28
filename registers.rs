@@ -46,3 +46,22 @@ pub struct ExceptionState {
     pub esp: u32,
     pub ss: u32
 }
+
+
+impl SuspendedState {
+    /// Copy values from an ExceptionState to a SuspendedState object
+    pub fn copyExceptionState(from: &ExceptionState) -> Self {
+        SuspendedState {
+            reg: from.reg,
+            gs: from.gs,
+            fs: from.fs,
+            es: from.es,
+            ds: from.ds,
+            eip: from.eip,
+            cs: from.cs,
+            eflags: from.eflags,
+            esp: from.esp,
+            ss: from.ss
+        }
+    }
+}

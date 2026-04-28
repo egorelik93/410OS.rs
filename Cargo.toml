@@ -15,9 +15,12 @@ crate-type = [ "staticlib" ]
 _410kern = { path = "../410kern" }
 num-traits = { version = "*", default-features = false }
 elain = "*"
+paste = "1.0"
 
 [profile.dev]
 panic = "abort"
+lto = "thin"
 
 [profile.release]
 panic = "abort"
+lto = "thin"

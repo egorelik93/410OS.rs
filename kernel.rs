@@ -24,10 +24,16 @@ use _410kern::asm::disable_interrupts;
 use _410kern::multiboot::MBInfo;
 
 use _410kern::seg::SEGSEL_KERNEL_CS;
+use drivers::console::installConsoleDriver;
+use drivers::keyboard::installKeyboardDriver;
+use drivers::timer::installTimerDriver;
 use idt_entry::{HARDWARE_PRIVILEGE, IDT, USER_PRIVILEGE, interruptGate, trapGate};
+use readfile::installFileSystem;
+use swexn::installExceptionGates;
 use syscall::*;
 use syscall_int::*;
-use thread::yieldThread;
+use task::installTaskManager;
+use thread::{installThreadManager, yieldThread};
 
 #[macro_use]
 mod variable_queue;
@@ -69,6 +75,7 @@ use drivers::{
     keyboard,
     timer
 };
+use virtual_memory::initVirtualMemory;
 
 
 #[macro_export]
@@ -97,6 +104,18 @@ pub unsafe extern "cdecl" fn kernel_main(mbinfo: MBInfo, argc: c_int, argv: *con
     lprintf!( "Hello from a brand new kernel!" );
 
     unsafe {
+        installConsoleDriver();
+        installTimerDriver();
+        installKeyboardDriver();
+
+        initVirtualMemory();
+
+        installThreadManager();
+        installTaskManager();
+
+        installExceptionGates();
+        installFileSystem();
+
         *IDT().add(HALT_INT) = interruptGate(USER_PRIVILEGE,
                                              haltHandlerWrapper,
                                              SEGSEL_KERNEL_CS);
